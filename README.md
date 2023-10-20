@@ -9,3 +9,4 @@ There are 3 json files used by the bot:
 
 # Building the Bot
 The bot uses a file called "config.json" (not uploaded) that will contain your Discord bot token with key "TOKEN".
+This file should be in the same path as the executable application.
