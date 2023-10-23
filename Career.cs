@@ -9,6 +9,7 @@ namespace DarkbulbBot
         public string ProductTeam { get; set; }
         public string Office { get; set; }
         public string Url { get; set; }
+        public string Datetime { get; set; }
         public string GetCareerDetails(bool isRemoved = false)
         {
             string statusEmoji = isRemoved ? "❌" : "🆕";
@@ -27,7 +28,8 @@ namespace DarkbulbBot
 
             details += $"**Craft:** {Craft}\n";
             details += $"**Product Team:** {ProductTeam}\n";
-            details += $"**Location:** {Office}";
+            details += $"**Location:** {Office}\n";
+            details += $"**Date Retrieved**: {Datetime}";
 
             return details;
         }

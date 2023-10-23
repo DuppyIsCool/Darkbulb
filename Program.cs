@@ -65,7 +65,6 @@ namespace DarkbulbBot
         public async Task BeginScraping() 
         {
             CareerManager.LoadCareers();
-            channelConfigurations = ChannelManager.LoadConfigurations();
             _timer = new Timer(ScrapeCareersCallback, null, TimeSpan.Zero, TimeSpan.FromHours(2));
         }
         public async Task Create_Commands()
@@ -97,6 +96,9 @@ namespace DarkbulbBot
 
         private async void ScrapeCareersCallback(object state)
         {
+            Console.WriteLine("Began loading channel config");
+            channelConfigurations = ChannelManager.LoadConfigurations();
+            Console.WriteLine($"Loaded {channelConfigurations.Count} channels");
             Console.WriteLine("Began Auto Scrap Callback");
             await ScrapeCareersAsync();
 
@@ -115,16 +117,30 @@ namespace DarkbulbBot
                     var textChannel = guild.GetTextChannel(channelId);
                     if (textChannel != null)
                     {
-                        foreach (var career in localNewCareers.Values)
-                        {
-                            var careerDetails = career.GetCareerDetails();
-                            var message = await textChannel.SendMessageAsync(careerDetails,  false, null);
-                        }
+                        // Get the bot as a user
+                        var botUser = guild.CurrentUser;
 
-                        foreach (var career in localRemovedCareers.Values)
+                        // Get the bot's permissions in the text channel
+                        var permissions = textChannel.GetPermissionOverwrite(botUser);
+
+                        // Check if the bot has permission to send messages
+                        if (permissions.HasValue && permissions.Value.SendMessages == PermValue.Allow)
                         {
-                            var careerDetails = career.GetCareerDetails(true);
-                            var message = await textChannel.SendMessageAsync(careerDetails, false, null);
+                            foreach (var career in localNewCareers.Values)
+                            {
+                                var careerDetails = career.GetCareerDetails();
+                                var message = await textChannel.SendMessageAsync(careerDetails, false, null);
+                            }
+
+                            foreach (var career in localRemovedCareers.Values)
+                            {
+                                var careerDetails = career.GetCareerDetails(true);
+                                var message = await textChannel.SendMessageAsync(careerDetails, false, null);
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Bot lacks permission to send messages in channel {channelId} of guild {guildId}");
                         }
                     }
                 }
@@ -135,6 +151,7 @@ namespace DarkbulbBot
             newCareers.Clear();
             removedCareers.Clear();
         }
+
 
 
         public async Task ScrapeCareersAsync()
@@ -156,26 +173,28 @@ namespace DarkbulbBot
                 var href = job.GetAttributeValue("href", "");
                 var parts = href.Split('/');
                 var jobId = parts[parts.Length - 1]; // Extracting the job ID from the href
+                var jobUrl = BaseJobUrl + jobId; // Constructing the full URL
 
-                if (CareerManager.GetCareer(jobId) == null)
+                var title = HtmlEntity.DeEntitize(job.SelectSingleNode(".//div[contains(@class, 'job-row__col--primary')]").InnerText.Trim());
+                var secondaryCols = job.SelectNodes(".//div[contains(@class, 'job-row__col--secondary')]");
+                var craft = HtmlEntity.DeEntitize(secondaryCols[0].InnerText.Trim());
+                var productTeam = HtmlEntity.DeEntitize(secondaryCols[1].InnerText.Trim());
+                var office = HtmlEntity.DeEntitize(secondaryCols[2].InnerText.Trim());
+                DateTime now = DateTime.Now;
+                var jsonID = $"{jobId}-{title}-{craft}-{office}";
+
+                if (CareerManager.GetCareer(jsonID) == null)
                 {
-                    var jobUrl = BaseJobUrl + jobId; // Constructing the full URL
-
-                    var title = HtmlEntity.DeEntitize(job.SelectSingleNode(".//div[contains(@class, 'job-row__col--primary')]").InnerText.Trim());
-                    var secondaryCols = job.SelectNodes(".//div[contains(@class, 'job-row__col--secondary')]");
-                    var craft = HtmlEntity.DeEntitize(secondaryCols[0].InnerText.Trim());
-                    var productTeam = HtmlEntity.DeEntitize(secondaryCols[1].InnerText.Trim());
-                    var office = HtmlEntity.DeEntitize(secondaryCols[2].InnerText.Trim());
-
                     Career tempCareer = new Career
                     {
-                        ID = jobId,
+                        ID = jsonID,
                         Title = title,
                         Craft = craft,
                         ProductTeam = productTeam,
                         Office = office,
-                        Url = jobUrl
-                    };
+                        Url = jobUrl,
+                        Datetime = now.ToString("U")
+                };
 
                     CareerManager.AddCareer(tempCareer);
                     newCareers.Add(jobId, tempCareer);
@@ -186,7 +205,7 @@ namespace DarkbulbBot
                 }
             }
 
-            Console.WriteLine("Finished scrapping jobs");
+            Console.WriteLine("Finished scrapping jobs, found "+newCareers.Count+ " new jobs");
             CareerManager.SaveCareers();
         }
     }

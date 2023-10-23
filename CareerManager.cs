@@ -84,10 +84,16 @@ namespace DarkbulbBot
                 {
                     var jsonData = File.ReadAllText(CareerFilePath);
                     var careers = JsonConvert.DeserializeObject<Dictionary<string, Career>>(jsonData);
-
-                    foreach (var career in careers)
+                    if (careers != null)
                     {
-                        activeCareers[career.Key] = career.Value;
+                        foreach (var career in careers)
+                        {
+                            activeCareers[career.Key] = career.Value;
+                        }
+                    }
+                    else 
+                    {
+                        Console.WriteLine($"Failed to deserialize careers json");
                     }
                 }
             }

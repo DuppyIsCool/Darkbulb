@@ -14,6 +14,14 @@ namespace DarkbulbBot
                     await command.RespondAsync("This command can only be used within a guild.");
                     return;
                 }
+
+                var user = command.User as SocketGuildUser;
+                if (user == null || !user.GuildPermissions.Administrator)
+                {
+                    await command.RespondAsync("You do not have permission to execute this command. Only administrators can run this command.");
+                    return;
+                }
+
                 var channelId = command.Channel.Id;
 
                 var configurations = ChannelManager.LoadConfigurations();
@@ -22,6 +30,6 @@ namespace DarkbulbBot
 
                 await command.RespondAsync($"Channel updated successfully. All notifications will be sent to <#{channelId}>.");
             }
-        }    
+        }
     }
 }
