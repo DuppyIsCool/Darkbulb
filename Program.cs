@@ -21,7 +21,7 @@ namespace DarkbulbBot
         public static DiscordSocketClient client;
         private CommandHandler commandHandler;
         private Dictionary<ulong,ulong> channelConfigurations;
-        private static readonly Dictionary<string, Career> removedCareers = new Dictionary<string, Career>();
+        private static  Dictionary<string, Career> removedCareers = new Dictionary<string, Career>();
         private static readonly Dictionary<string, Career> newCareers = new Dictionary<string, Career>();
         //private Dictionary<
         private static Timer _timer;
@@ -166,14 +166,14 @@ namespace DarkbulbBot
             var htmlDocument = new HtmlDocument();
             htmlDocument.LoadHtml(content);
 
-            var removedCareers = new Dictionary<string, Career>(CareerManager.GetActiveCareers());
+            removedCareers = new Dictionary<string, Career>(CareerManager.GetActiveCareers());
 
             foreach (var job in htmlDocument.DocumentNode.SelectNodes("//a[contains(@class, 'job-row__inner')]"))
             {
                 var href = job.GetAttributeValue("href", "");
                 var parts = href.Split('/');
-                var jobId = parts[parts.Length - 1]; // Extracting the job ID from the href
-                var jobUrl = BaseJobUrl + jobId; // Constructing the full URL
+                var jobNum = parts[parts.Length - 1]; // Extracting the job ID from the href
+                var jobUrl = BaseJobUrl + jobNum; // Constructing the full URL
 
                 var title = HtmlEntity.DeEntitize(job.SelectSingleNode(".//div[contains(@class, 'job-row__col--primary')]").InnerText.Trim());
                 var secondaryCols = job.SelectNodes(".//div[contains(@class, 'job-row__col--secondary')]");
@@ -181,7 +181,7 @@ namespace DarkbulbBot
                 var productTeam = HtmlEntity.DeEntitize(secondaryCols[1].InnerText.Trim());
                 var office = HtmlEntity.DeEntitize(secondaryCols[2].InnerText.Trim());
                 DateTime now = DateTime.Now;
-                var jsonID = $"{jobId}-{title}-{craft}-{office}";
+                var jsonID = $"{jobNum}-{title}-{craft}-{office}";
 
                 if (CareerManager.GetCareer(jsonID) == null)
                 {
@@ -197,15 +197,21 @@ namespace DarkbulbBot
                 };
 
                     CareerManager.AddCareer(tempCareer);
-                    newCareers.Add(jobId, tempCareer);
+                    newCareers.Add(jobNum, tempCareer);
                 }
                 else
                 {
-                    removedCareers.Remove(jobId);
+                    removedCareers.Remove(jsonID);
                 }
             }
 
-            Console.WriteLine("Finished scrapping jobs, found "+newCareers.Count+ " new jobs");
+            //Remove the old jobs from our list of active careers.
+            foreach(var job in removedCareers) 
+            {
+                CareerManager.RemoveCareer(job.Value.ID);
+            }
+
+            Console.WriteLine("Finished scrapping jobs, found "+newCareers.Count+ " new jobs with "+removedCareers.Count + " removals");
             CareerManager.SaveCareers();
         }
     }
