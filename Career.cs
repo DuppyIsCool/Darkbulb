@@ -1,5 +1,4 @@
-﻿// Career.cs
-using System.Text;
+﻿using System.Text;
 using DiffPlex;
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
@@ -16,7 +15,7 @@ namespace DarkbulbBot
         public string Url { get; set; }
         public string Datetime { get; set; }
 
-        // Job Code (REQ-xxxxx)
+        // Job Code (REQ-xxxxx or sometimes just a number)
         public string JobCode { get; set; }
 
         // Full description text
@@ -24,6 +23,7 @@ namespace DarkbulbBot
 
         /// <summary>
         /// Returns an inline diff between old and new descriptions, prefixed with + for additions, - for removals.
+        /// Currently unused, diffs too large for discord messages and this may just result in unneeded noise..
         /// </summary>
         public static string GetDescriptionDiff(string oldDesc, string newDesc)
         {

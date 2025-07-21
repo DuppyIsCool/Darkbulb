@@ -1,5 +1,4 @@
-﻿// CommandHandler.cs
-using System.Text;
+﻿using System.Text;
 using Discord.WebSocket;
 using Newtonsoft.Json.Linq;
 
