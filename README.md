@@ -8,7 +8,7 @@ There are 3 json files used by the bot:
 
 
 # Building the Bot
-You can now use Docker to build the bot. You'll need to rename the .envtemplate to .env and fill in the environment variables:
+You can now use Docker compose to build/run the bot. You'll need to rename the .envtemplate to .env and fill in the environment variables:
 - `BOT_TOKEN` This will be your bot's discord token
 - `APP_ID` This is your discord bot's application Id.
 
