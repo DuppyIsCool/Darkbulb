@@ -1,0 +1,12 @@
+services:
+  darkbulb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: darkbulb-bot:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./changelogs:/app/changelogs
+    restart: unless-stopped

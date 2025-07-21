@@ -1,218 +1,294 @@
-﻿using Discord;
+﻿// Program.cs
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Discord;
 using Discord.Net;
 using Discord.WebSocket;
 using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
-using System.IO;
-using System.Net.Http;
-using HtmlAgilityPack;
-using System.Threading;
 
 namespace DarkbulbBot
 {
     class Program
     {
+        private static DiscordSocketClient _client;
+        private readonly CommandHandler _commandHandler = new CommandHandler();
+
+        // Channel config: guildId → channelId
+        private static Dictionary<ulong, ulong> _channelConfigurations;
+
+        // Two independent timers
+        private static Timer _listingTimer;
+        private static Timer _detailTimer;
+
+        // In‑memory cache of active careers
+        private static Dictionary<string, Career> _existingCareers;
+
+        // For rotating through detail‑checks
+        private static int _detailIndex = 0;
+        private const int DetailBatchSize = 15;  // process 15 jobs per 10min
+
+        private static readonly JobScraper _scraper = new JobScraper();
+
         public static Task Main(string[] args) => new Program().MainAsync();
-        public static DiscordSocketClient client;
-        private CommandHandler commandHandler;
-        private Dictionary<ulong,ulong> channelConfigurations;
-        private static  Dictionary<string, Career> removedCareers = new Dictionary<string, Career>();
-        private static readonly Dictionary<string, Career> newCareers = new Dictionary<string, Career>();
-        //private Dictionary<
-        private static Timer _timer;
+
         public async Task MainAsync()
         {
-            
-            commandHandler = new CommandHandler();
-            client = new DiscordSocketClient();
+            _client = new DiscordSocketClient();
+            _client.Log += LogAsync;
+            _client.Ready += OnReadyAsync;
+            _client.SlashCommandExecuted += _commandHandler.SlashCommandHandler;
+            _client.Disconnected += OnDisconnectedAsync;
 
-            
+            var token = Environment.GetEnvironmentVariable("BOT_TOKEN");
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("BOT_TOKEN not set.");
 
-            //Register our Log and Create Commands
-            client.Log += Log;
-            client.Ready += Create_Commands;
-            client.SlashCommandExecuted += commandHandler.SlashCommandHandler;
-            client.Ready += BeginScraping;
-            // Path to the config.json file
-            string configFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+            await _client.LoginAsync(TokenType.Bot, token);
+            await _client.StartAsync();
 
-            // Read the content of the config.json file
-            string configContent;
-            using (StreamReader reader = new StreamReader(configFilePath))
-            {
-                configContent = reader.ReadToEnd();
-            }
-
-            // Parse the JSON content
-            JObject configJson = JObject.Parse(configContent);
-
-            // Access the key from JSON
-            var token = configJson["TOKEN"].ToString();
-
-            await client.LoginAsync(TokenType.Bot, token);
-            await client.StartAsync();
-            
-            
-            // Block this task until the program is closed.
-            await Task.Delay(-1);
+            await Task.Delay(Timeout.Infinite);
         }
 
-        public async Task BeginScraping() 
+        private Task LogAsync(LogMessage msg)
         {
-            CareerManager.LoadCareers();
-            _timer = new Timer(ScrapeCareersCallback, null, TimeSpan.Zero, TimeSpan.FromHours(2));
-        }
-        public async Task Create_Commands()
-        {
-            Console.WriteLine("Setting up commands");
-
-            var setChannelCommand = new SlashCommandBuilder();
-            setChannelCommand.WithName("set-channel");
-            setChannelCommand.WithDescription("Sets the channel for bot output");
-            try
-            {
-                await client.CreateGlobalApplicationCommandAsync(setChannelCommand.Build());
-
-                Console.WriteLine("Finished setting up commands");
-            }
-            catch (HttpException exception)
-            {
-                var json = JsonConvert.SerializeObject(exception.Errors, Formatting.Indented);
-
-                Console.WriteLine(json);
-            }  
-        }
-
-        private Task Log(LogMessage msg)
-        {
-            Console.WriteLine(msg.ToString());
+            Console.WriteLine(msg);
             return Task.CompletedTask;
         }
 
-        private async void ScrapeCareersCallback(object state)
+        private async Task OnReadyAsync()
         {
-            Console.WriteLine("Began loading channel config");
-            channelConfigurations = ChannelManager.LoadConfigurations();
-            Console.WriteLine($"Loaded {channelConfigurations.Count} channels");
-            Console.WriteLine("Began Auto Scrap Callback");
-            await ScrapeCareersAsync();
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Bot ready; registering commands and starting schedules...");
 
-            // Creating local copies of the dictionaries before entering the main loop
-            var localNewCareers = new Dictionary<string, Career>(newCareers);
-            var localRemovedCareers = new Dictionary<string, Career>(removedCareers);
+            _channelConfigurations = ChannelManager.LoadConfigurations();
+            CareerManager.LoadCareers();
+            _existingCareers = CareerManager.GetActiveCareers();
 
-            foreach (var config in channelConfigurations)
-            {
-                var guildId = config.Key;
-                var channelId = config.Value;
-                Console.WriteLine($"Messaging for guild id {guildId}");
-                var guild = client.GetGuild(guildId);
-                if (guild != null)
-                {
-                    var textChannel = guild.GetTextChannel(channelId);
-                    if (textChannel != null)
-                    {
-                        // Get the bot as a user
-                        var botUser = guild.CurrentUser;
+            await RegisterCommandsAsync();
 
-                        // Get the bot's permissions in the text channel
-                        var permissions = textChannel.GetPermissionOverwrite(botUser);
-
-                        // Check if the bot has permission to send messages
-                        if (permissions.HasValue && permissions.Value.SendMessages == PermValue.Allow)
-                        {
-                            foreach (var career in localNewCareers.Values)
-                            {
-                                var careerDetails = career.GetCareerDetails();
-                                var message = await textChannel.SendMessageAsync(careerDetails, false, null);
-                            }
-
-                            foreach (var career in localRemovedCareers.Values)
-                            {
-                                var careerDetails = career.GetCareerDetails(true);
-                                var message = await textChannel.SendMessageAsync(careerDetails, false, null);
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Bot lacks permission to send messages in channel {channelId} of guild {guildId}");
-                        }
-                    }
-                }
-            }
-
-            Console.WriteLine("Finished Messaging");
-            // Clear the new and removed careers dictionaries after processing
-            newCareers.Clear();
-            removedCareers.Clear();
+            _listingTimer = new Timer(async _ => await ScrapeListingAndAnnounceAsync(), null, TimeSpan.Zero, TimeSpan.FromMinutes(30));
+            _detailTimer = new Timer(async _ => await CheckDetailBatchAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(10));
         }
 
-
-
-        public async Task ScrapeCareersAsync()
+        private async Task RegisterCommandsAsync()
         {
-            Console.WriteLine("Began scrapping jobs");
-            string BaseJobUrl = "https://www.riotgames.com/en/work-with-us/job/";
-            var url = "https://www.riotgames.com/en/work-with-us/jobs";
-            var httpClient = new HttpClient();
-            var response = await httpClient.GetAsync(url);
-            var content = await response.Content.ReadAsStringAsync();
+            var setChannel = new SlashCommandBuilder().WithName("set-channel").WithDescription("Sets the channel for bot announcements.");
+            var export = new SlashCommandBuilder().WithName("export-history").WithDescription("Export all job history to CSV.");
+            var changelog = new SlashCommandBuilder().WithName("changelog").WithDescription("Get the change history for a given job.")
+                .AddOption("jobcode", ApplicationCommandOptionType.String, "REQ‑ID", isRequired: true);
 
-            var htmlDocument = new HtmlDocument();
-            htmlDocument.LoadHtml(content);
-
-            removedCareers = new Dictionary<string, Career>(CareerManager.GetActiveCareers());
-
-            foreach (var job in htmlDocument.DocumentNode.SelectNodes("//a[contains(@class, 'job-row__inner')]"))
+            try
             {
-                var href = job.GetAttributeValue("href", "");
-                var parts = href.Split('/');
-                var jobNum = parts[parts.Length - 1]; // Extracting the job ID from the href
-                var jobUrl = BaseJobUrl + jobNum; // Constructing the full URL
+                await _client.CreateGlobalApplicationCommandAsync(setChannel.Build());
+                await _client.CreateGlobalApplicationCommandAsync(export.Build());
+                await _client.CreateGlobalApplicationCommandAsync(changelog.Build());
+                Console.WriteLine($"[{DateTime.UtcNow:O}] Slash commands registered.");
+            }
+            catch (HttpException ex)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:O}] Failed to register commands: {ex.Message}");
+            }
+        }
 
-                var title = HtmlEntity.DeEntitize(job.SelectSingleNode(".//div[contains(@class, 'job-row__col--primary')]").InnerText.Trim());
-                var secondaryCols = job.SelectNodes(".//div[contains(@class, 'job-row__col--secondary')]");
-                var craft = HtmlEntity.DeEntitize(secondaryCols[0].InnerText.Trim());
-                var productTeam = HtmlEntity.DeEntitize(secondaryCols[1].InnerText.Trim());
-                var office = HtmlEntity.DeEntitize(secondaryCols[2].InnerText.Trim());
-                DateTime now = DateTime.Now;
-                var jsonID = $"{jobNum}-{title}-{craft}-{office}";
+        private Task OnDisconnectedAsync(Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Disconnected: {ex?.Message}. Reconnecting in 10s...");
+            _ = Task.Delay(10000).ContinueWith(_ => _client.StartAsync());
+            return Task.CompletedTask;
+        }
 
-                if (CareerManager.GetCareer(jsonID) == null)
+        /// <summary>
+        /// Runs every 30m: fetch listing, detect new/removals, log & announce.
+        /// </summary>
+        private async Task ScrapeListingAndAnnounceAsync()
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Starting listing scrape...");
+            var summaries = await _scraper.ScrapeListingAsync();
+            var newJobs = new List<Career>();
+            var removedKeys = new HashSet<string>(_existingCareers.Keys);
+
+            // Detect new
+            foreach (var sum in summaries)
+            {
+                var key = $"{sum.RawId}-{sum.Title}-{sum.Craft}-{sum.ProductTeam}-{sum.Office}";
+                removedKeys.Remove(key);
+
+                if (!_existingCareers.ContainsKey(key))
                 {
-                    Career tempCareer = new Career
+                    var detail = await _scraper.FetchJobDetailAsync(sum);
+                    var career = new Career
                     {
-                        ID = jsonID,
-                        Title = title,
-                        Craft = craft,
-                        ProductTeam = productTeam,
-                        Office = office,
-                        Url = jobUrl,
-                        Datetime = now.ToString("U")
-                };
-
-                    CareerManager.AddCareer(tempCareer);
-                    newCareers.Add(jobNum, tempCareer);
-                }
-                else
-                {
-                    removedCareers.Remove(jsonID);
+                        ID = key,
+                        Title = detail.Title,
+                        Craft = detail.Craft,
+                        ProductTeam = detail.ProductTeam,
+                        Office = detail.Office,
+                        Url = detail.Url,
+                        Datetime = DateTime.UtcNow.ToString("U"),
+                        JobCode = detail.RealJobId,
+                        Description = detail.Description
+                    };
+                    CareerManager.AddCareer(career);
+                    WriteCreatedChangelog(detail);
+                    _existingCareers[key] = career;
+                    newJobs.Add(career);
                 }
             }
 
-            //Remove the old jobs from our list of active careers.
-            foreach(var job in removedCareers) 
+            // Detect removed, but collect objects *before* we delete them
+            var removedList = new List<Career>();
+            foreach (var key in removedKeys)
             {
-                CareerManager.RemoveCareer(job.Value.ID);
+                var old = _existingCareers[key];
+                WriteRemovedChangelog(old);
+                removedList.Add(old);
+                CareerManager.RemoveCareer(key);
+                _existingCareers.Remove(key);
             }
 
-            Console.WriteLine("Finished scrapping jobs, found "+newCareers.Count+ " new jobs with "+removedCareers.Count + " removals");
             CareerManager.SaveCareers();
+            await AnnounceChangesAsync(newJobs, removedList);
+
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Finished listing scrape: {newJobs.Count} new, {removedKeys.Count} removed.");
         }
+
+        private async Task CheckDetailBatchAsync()
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Starting detail batch (index {_detailIndex})...");
+            var keys = _existingCareers.Keys.ToList();
+            if (!keys.Any())
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:O}] No careers to process in detail batch.");
+                return;
+            }
+            var batch = keys.Skip(_detailIndex).Take(DetailBatchSize).ToList();
+            if (batch.Count < DetailBatchSize)
+                batch.AddRange(keys.Take(DetailBatchSize - batch.Count));
+            _detailIndex = (_detailIndex + DetailBatchSize) % keys.Count;
+            int processed = 0;
+            foreach (var key in batch)
+            {
+                processed++;
+                var career = _existingCareers[key];
+                var sum = new ScrapedJobSummary
+                {
+                    RawId = career.ID.Split('-')[0],
+                    Title = career.Title,
+                    Craft = career.Craft,
+                    ProductTeam = career.ProductTeam,
+                    Office = career.Office,
+                    Url = career.Url
+                };
+                var detail = await _scraper.FetchJobDetailAsync(sum);
+                if (detail.Description != career.Description)
+                {
+                    AppendDescriptionChangelog(career, detail);
+                    career.Description = detail.Description;
+                    career.Datetime = DateTime.UtcNow.ToString("U");
+                    await AnnounceDescriptionChangeAsync(detail);
+                }
+            }
+            CareerManager.SaveCareers();
+            Console.WriteLine($"[{DateTime.UtcNow:O}] Finished detail batch. Processed {processed} jobs.");
+        }
+
+        #region Changelog Helpers
+
+        private void WriteCreatedChangelog(ScrapedJob detail)
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "changelogs");
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, $"{detail.RealJobId}-changelog.json");
+            var rec = new JObject
+            {
+                ["Timestamp"] = DateTime.UtcNow.ToString("o"),
+                ["Action"] = "Created",
+                ["Title"] = detail.Title,
+                ["Craft"] = detail.Craft,
+                ["ProductTeam"] = detail.ProductTeam,
+                ["Office"] = detail.Office,
+                ["Url"] = detail.Url,
+                ["Description"] = detail.Description
+            };
+            File.WriteAllText(file, JsonConvert.SerializeObject(new[] { rec }, Formatting.Indented));
+        }
+
+        private void WriteRemovedChangelog(Career c)
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "changelogs");
+            var file = Path.Combine(dir, $"{c.JobCode}-changelog.json");
+            if (!File.Exists(file)) return;
+            var history = JArray.Parse(File.ReadAllText(file));
+            history.Add(new JObject
+            {
+                ["Timestamp"] = DateTime.UtcNow.ToString("o"),
+                ["Action"] = "Removed"
+            });
+            File.WriteAllText(file, JsonConvert.SerializeObject(history, Formatting.Indented));
+        }
+
+        private void AppendDescriptionChangelog(Career old, ScrapedJob detail)
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "changelogs");
+            var file = Path.Combine(dir, $"{old.JobCode}-changelog.json");
+            var history = JArray.Parse(File.ReadAllText(file));
+            history.Add(new JObject
+            {
+                ["Timestamp"] = DateTime.UtcNow.ToString("o"),
+                ["Action"] = "DescriptionUpdated",
+                ["OldDescription"] = old.Description,
+                ["NewDescription"] = detail.Description
+            });
+            File.WriteAllText(file, JsonConvert.SerializeObject(history, Formatting.Indented));
+        }
+
+        #endregion
+
+        #region Announcements
+
+        /// <summary>
+        /// Announces new and removed jobs to each configured channel.
+        /// </summary>
+        private async Task AnnounceChangesAsync(List<Career> newJobs, List<Career> removedJobs)
+        {
+            foreach (var kv in _channelConfigurations)
+            {
+                var guild = _client.GetGuild(kv.Key);
+                var channel = guild?.GetTextChannel(kv.Value);
+                if (channel == null) continue;
+
+                // Announce new jobs
+                foreach (var j in newJobs)
+                {
+                    var msg = j.GetCareerDetails();
+                    await channel.SendMessageAsync(msg);
+                }
+
+                // Announce removals
+                foreach (var old in removedJobs)
+                {
+                    var msg = old.GetCareerDetails(isRemoved: true);
+                    await channel.SendMessageAsync(msg);
+                }
+            }
+        }
+
+        private async Task AnnounceDescriptionChangeAsync(ScrapedJob detail)
+        {
+            foreach (var kv in _channelConfigurations)
+            {
+                var guild = _client.GetGuild(kv.Key);
+                var channel = guild?.GetTextChannel(kv.Value);
+                if (channel == null) continue;
+                var msg = $"✏️ Description updated for **{detail.Title}** ({detail.RealJobId})";
+                await channel.SendMessageAsync(msg);
+            }
+        }
+
+        #endregion
     }
 }

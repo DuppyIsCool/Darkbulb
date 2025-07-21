@@ -8,10 +8,10 @@ namespace DarkbulbBot
     class CareerManager
     {
         private static readonly Dictionary<string, Career> activeCareers = new Dictionary<string, Career>();
-        private static readonly string CareerFilePath = "careers.json";
-        public static void AddCareer(Career career) 
+        private static readonly string CareerFilePath = "configs/careers.json";
+        public static void AddCareer(Career career)
         {
-            if (career == null || string.IsNullOrWhiteSpace(career.ID)) 
+            if (career == null || string.IsNullOrWhiteSpace(career.ID))
             {
                 Console.WriteLine($"Error: Tried to add null career");
                 return;
@@ -21,13 +21,13 @@ namespace DarkbulbBot
                 Console.WriteLine($"Error: Tried to add career that already exists '{career.ID}'");
                 return;
             }
-            else 
+            else
             {
                 activeCareers.Add(career.ID, career);
             }
         }
 
-        public static void RemoveCareer(string ID) 
+        public static void RemoveCareer(string ID)
         {
             if (string.IsNullOrWhiteSpace(ID))
             {
@@ -39,21 +39,21 @@ namespace DarkbulbBot
             {
                 activeCareers.Remove(ID);
             }
-            else 
+            else
             {
                 Console.WriteLine($"Error: Tried to remove ID that does not exist '{ID}'");
             }
         }
 
-        public static Career GetCareer(string ID) 
+        public static Career GetCareer(string ID)
         {
-            if (string.IsNullOrWhiteSpace(ID)) 
+            if (string.IsNullOrWhiteSpace(ID))
             {
                 Console.WriteLine($"Error: Null or invalid ID provided in GetCareer");
                 return null;
             }
 
-            if (activeCareers.ContainsKey(ID)) 
+            if (activeCareers.ContainsKey(ID))
             {
                 return activeCareers[ID];
             }
@@ -91,7 +91,7 @@ namespace DarkbulbBot
                             activeCareers[career.Key] = career.Value;
                         }
                     }
-                    else 
+                    else
                     {
                         Console.WriteLine($"Failed to deserialize careers json");
                     }
