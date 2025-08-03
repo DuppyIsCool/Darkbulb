@@ -18,5 +18,5 @@ However the bot will only send messages to servers & channels in it's channel_co
 
 # Commands
 - /changelog {JOB ID} - Sends the changelog for a specific job id
-- /exportg - Exports the job changelog history in a CSV
+- /export - Exports the job changelog history in a CSV
 - /set-channel Set's the channel for changelog message output.
